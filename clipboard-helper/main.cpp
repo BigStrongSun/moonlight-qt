@@ -271,7 +271,19 @@ private:
     // clipboard writes whose blocking is what this refactor defends against.
     void adoptEngine(ClipboardSync* engine, QThread* worker)
     {
+#if defined(Q_OS_WIN)
+        // QClipboard is documented as GUI-thread-only. Moving the engine to a
+        // worker thread makes every setText() and every dataChanged() silently
+        // do nothing on Windows: measured read-back after setText() returned an
+        // empty string and no local-change signal was ever delivered, so both
+        // clipboard directions were dead. Keep the engine on the GUI thread
+        // here; the blocking-contention rationale only applies to platforms
+        // with their own native pasteboard path (macOS).
+        Q_UNUSED(worker);
+        engine->moveToThread(QCoreApplication::instance()->thread());
+#else
         engine->moveToThread(worker);
+#endif
         m_ClipboardEngine = engine;
     }
 
