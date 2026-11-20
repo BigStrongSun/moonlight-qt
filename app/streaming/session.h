@@ -143,6 +143,11 @@ public:
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
                         bool& isHdrSupported, QSize& maxResolution);
 
+    // 只有正常启动的实例才是"主机选择窗口"。CLI 拉起的实例（stream/quit/pair）
+    // 只负责呈现一路串流画面，必须沿用原行为：串流期间隐藏自己的 Qt 窗口，
+    // 否则每路串流都会多带一个 segue 窗口。
+    static void setSecondaryInstance(bool secondary);
+
     static Session* get()
     {
         return s_ActiveSession;
@@ -484,6 +489,7 @@ private:
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;
     static QSemaphore s_ActiveSessionSemaphore;
+    static bool s_isSecondaryInstance;
 #ifndef STEAM_LINK
     MicStream* m_MicStream;
 #else

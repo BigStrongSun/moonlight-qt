@@ -1592,6 +1592,11 @@ int main(int argc, char *argv[])
         }
     }
 
+    // 只有 NormalStartRequested 才是用户看到的"选择窗口"；其余都是被拉起来
+    // 干活的实例，不应保留列表窗口。
+    Session::setSecondaryInstance(commandLineParserResult !=
+                                   GlobalCommandLineParser::NormalStartRequested);
+
     // Help, version, and argument errors (including subcommand parsers above)
     // exit without unwinding automatic objects. Retain the shared SDL/EGL
     // resources only after those paths, and before QML can probe SDL video.

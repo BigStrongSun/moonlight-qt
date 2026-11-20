@@ -217,13 +217,19 @@ private:
     // QNetworkAccessManager event-loop callbacks land back on the GUI thread.
     bool buildBlobUrl(const QString& tail, QUrl& outUrl) const;
     QNetworkAccessManager* nam();
-    void uploadAndSendRef(const QByteArray& payload, const QString& mime, quint32 token = 0);
-    void fetchRefAndApply(const QString& id, const QString& mime, qint64 advertisedSize);
+    void uploadAndSendRef(const QByteArray& payload, const QString& mime, quint32 token = 0,
+                          const QString& name = QString());
+    void fetchRefAndApply(const QString& id, const QString& mime, qint64 advertisedSize,
+                          const QString& name = QString());
     void fetchBlob(const QString& id,
                    qint64 advertisedSize,
                    const std::function<void(const QByteArray&, const QString&)>& onFetched);
     void applyInboundText(const QByteArray& payload);
     void applyInboundPng(const QByteArray& payload);
+    // 文件剪贴板：入站把 blob 落到收件目录后用 setUrls() 放上剪贴板（Windows 上
+    // Qt 会转成 CF_HDROP，资源管理器可直接粘贴为文件）；出站读第一个本地文件上行。
+    void applyInboundFile(const QByteArray& bytes, const QString& name);
+    void sendLocalFileOutbound(const QMimeData* mime);
 
     // Compound burst aggregation (see class comment).
     quint32 nextToken();
@@ -243,6 +249,7 @@ private:
     quint32 m_CurrentToken = 0;
     quint32 m_OutgoingToken = 0;
     QByteArray m_LastOutboundRef;
+    QString m_LastFileSignature;   // 文件名+大小，用于避免重复上行同一个文件
     QElapsedTimer m_Clock;
     QQueue<QPair<quint32, qint64>> m_RetiredTokens;
     QSet<QNetworkReply*> m_BlobReplies;

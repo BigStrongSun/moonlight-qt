@@ -12,6 +12,12 @@ import "Brand.js" as Brand
 
 Item {
     property Session session
+    // 策略开启时我们在串流窗口出现前就把 segue 弹掉，让主窗口回到列表页；
+    // 这样 sessionFinished() 就不该再弹一次（否则会连列表页一起弹掉）。
+    property bool poppedEarly: false
+    // 拆分模式：segue 不入栈也不显示，主窗口始终停在列表页，
+    // 串流画面由 SDL 自己创建的窗口呈现。
+    property bool detached: false
     property string appName
 
     // 正在启动的这个游戏的封面。加载页用它做背景，而不是首页的主机壁纸——
@@ -70,11 +76,15 @@ Item {
 
     function hideForStreaming()
     {
+        if (StreamingPreferences.keepListWindowVisible) {
+            // 主窗口会被保留，所以这些内容要继续显示，否则窗口里只剩一张背景
+        } else {
         // Hide the UI contents so the user doesn't
         // see them briefly when we pop off the StackView
         stageSpinner.visible = false
         stageLabel.visible = false
         hintText.visible = false
+        }
 
         // 窗口本身不在这里藏，由 Session::exec() 在串流窗口进入全屏之后隐藏。
         // 提前藏的话，macOS 切进新 Space 的整个动画期间旧 Space 露出来的是桌面，
@@ -86,6 +96,36 @@ Item {
         // 淡出到全黑。Session::exec() 会等这条动画跑完再创建串流窗口，
         // 所以交接是在一块纯黑上完成的，中间不会闪。
         backgroundZoomAnimation.stop()
+        // 注意：CLI 拉起的实例也会用本文件（CliStartStreamSegue.qml 的
+        // onSessionCreated 里 createObject("StreamSegue.qml") 并 push），但带
+        // quitAfter: true。若不排除它，次实例会被 pop 回 CLI 自己的加载页，
+        // 于是每路串流旁边都多挂一个"正在启动…"窗口。
+        if (StreamingPreferences.keepListWindowVisible && !quitAfter) {
+            // 关键：这层淡到全黑的幕原本假定窗口随后会被隐藏。
+            // 保留主窗口时必须跳过它，否则屏幕上留下的就是一块纯黑。
+            contentRoot.opacity = 1
+
+            // 把 segue 弹掉，让主窗口回到应用/主机列表页。
+            // 依据 Qt 文档的 Item Ownership：push 已存在对象的 pop 不会销毁该对象
+            // （这里是 createObject 后再 push 的），所以 C++ 侧连到本对象的
+            // sessionFinished / readyForDeletion 等信号仍然有效。
+            // 注意：push 时 pushExit 已经把上一页的 opacity 动画到 0 了
+            // （main.qml:270-274）。用 Immediate pop 不会跑 popEnter，
+            // 那一页就永远停在透明状态 —— 看着像纯黑，而且点不到。
+            // 所以先拿到它，pop 之后手动复位。
+            if (!detached) {
+                var reveal = stackView.get(stackView.depth - 2)
+                stackView.pop(StackView.Immediate)
+                if (reveal) {
+                    // pushExit 已把上一页淡到 0，而 Immediate pop 不跑 popEnter，
+                    // 不复位就会一直是透明的（看着像纯黑且点不到）。
+                    reveal.opacity = 1
+                    reveal.x = 0
+                }
+                poppedEarly = true
+            }
+            return
+        }
         exitAnimation.start()
     }
 
@@ -100,7 +140,17 @@ Item {
     {
         // Avoid the push transition animation
         var component = Qt.createComponent("QuitSegue.qml")
-        stackView.replace(stackView.currentItem, component.createObject(stackView, {"appName": appName}), StackView.Immediate)
+        var quitSegue = component.createObject(stackView, {"appName": appName})
+        if (detached) {
+            // 拆分模式：主窗口一直在列表页，不要插入退出覆盖层
+            quitSegue.destroy()
+        } else if (poppedEarly) {
+            // 主窗口已经回到列表页了。这里必须 push：再 replace currentItem
+            // 会把列表页本身换掉，QuitSegue 自己 pop 之后就落到 PcView 而不是 AppView。
+            stackView.push(quitSegue, StackView.Immediate)
+        } else {
+            stackView.replace(stackView.currentItem, quitSegue, StackView.Immediate)
+        }
 
         // Show the Qt window again to show quit segue
         window.visible = true
@@ -116,7 +166,7 @@ Item {
         SdlGamepadKeyNavigation.enable()
 
         // Pop the StreamSegue off the stack if this is a GUI-based app launch
-        if (!quitAfter) {
+        if (!quitAfter && !poppedEarly && !detached) {
             stackView.pop()
         }
 
@@ -145,6 +195,15 @@ Item {
         // and keeps other libraries (like SDL_TTF) around until it is deleted.
         session = null
         gc()
+
+        if (detached) {
+            // 先解除 AppView 的启动护栏，再自毁
+            // （没入栈的 segue 不会被 StackView 回收，必须自己 destroy）
+            if (window.detachedSegue === this) {
+                window.detachedSegue = null
+            }
+            destroy()
+        }
     }
 
     StackView.onDeactivating: {
@@ -155,9 +214,11 @@ Item {
         SdlGamepadKeyNavigation.enable()
     }
 
-    StackView.onActivated: {
+    function activate() {
         // Hide the toolbar before we start loading
-        toolBar.shown = false
+        if (!detached) {
+            toolBar.shown = false
+        }
 
         // Hook up our signals
         session.stageStarting.connect(stageStarting)
@@ -177,6 +238,20 @@ Item {
 
         // Kick off the stream
         streamLoader.active = true
+    }
+
+    StackView.onActivated: {
+        if (!detached) {
+            activate()
+        }
+    }
+
+    // 拆分模式下不会被 push，也就永远不会 activate；
+    // 而 createObject 会同步触发本回调，所以 detached 必须作为初始属性传入。
+    Component.onCompleted: {
+        if (detached) {
+            activate()
+        }
     }
 
     // 上一页（游戏列表）的背景先留在最底层。封面在它上面淡入，

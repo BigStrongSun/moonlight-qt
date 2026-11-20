@@ -680,14 +680,34 @@ CenteredGridView {
                 return
             }
 
+            // 拆分模式护栏：Session::s_ActiveSessionSemaphore 初值只有 1（session.cpp:399），
+            // 第二次 Session::start() 会在 :4453 的 acquire() 上阻塞 GUI 线程，
+            // 表现就是窗口"未响应"。原设计靠"串流时隐藏主窗口"隐式避免了这一点。
+            if (StreamingPreferences.keepListWindowVisible && window.detachedSegue) {
+                // 本进程已经有一路在跑了，另开一个进程去串它，
+                // 这样"点第二个"就会弹出新的串流窗口。
+                ComputerManager.spawnStreamInstance(
+                            ComputerManager.addressForIndex(computerIndex), model.name)
+                return
+            }
+
             var component = Qt.createComponent("StreamSegue.qml")
             var segue = component.createObject(stackView, {
                                                    "appName": model.name,
                                                    "boxArtUrl": model.boxart,
                                                    "session": appModel.createSessionForApp(index, selectedDisplayTarget),
-                                                   "isResume": runningId === model.appid
+                                                   "isResume": runningId === model.appid,
+                                                   // 必须在这里传：createObject 会同步触发
+                                                   // Component.onCompleted，之后再赋值就晚了
+                                                   "detached": StreamingPreferences.keepListWindowVisible
                                                })
-            stackView.push(segue)
+            if (StreamingPreferences.keepListWindowVisible) {
+                // 拆分模式：不入栈、不显示，主窗口停在列表页
+                segue.visible = false
+                window.detachedSegue = segue
+            } else {
+                stackView.push(segue)
+            }
         }
 
         onClicked: {

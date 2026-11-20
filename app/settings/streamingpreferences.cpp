@@ -30,6 +30,7 @@
 #define SER_YUV444 "yuv444"
 #define SER_VIDEODEC "videodec"
 #define SER_WINDOWMODE "windowmode"
+#define SER_KEEPLISTWINDOWVISIBLE "keepListWindowVisible"
 #define SER_MDNS "mdns"
 #define SER_QUITAPPAFTER "quitAppAfter"
 #define SER_ABSMOUSEMODE "mouseacceleration"
@@ -348,6 +349,7 @@ void StreamingPreferences::reload()
     uiDisplayMode = static_cast<UIDisplayMode>(settings.value(SER_UIDISPLAYMODE,
                                                static_cast<int>(settings.value(SER_STARTWINDOWED, true).toBool() ? UIDisplayMode::UI_WINDOWED
                                                                                                                  : UIDisplayMode::UI_MAXIMIZED)).toInt());
+    keepListWindowVisible = settings.value(SER_KEEPLISTWINDOWVISIBLE, true).toBool();
     rememberWindowPosition = settings.value(SER_REMEMBERWINDOWPOSITION, true).toBool();
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
@@ -735,6 +737,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_RENDERER, static_cast<int>(rendererSelection));
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
+    settings.setValue(SER_KEEPLISTWINDOWVISIBLE, keepListWindowVisible);
     settings.setValue(SER_UIDISPLAYMODE, static_cast<int>(uiDisplayMode));
     settings.setValue(SER_REMEMBERWINDOWPOSITION, rememberWindowPosition);
     settings.setValue(SER_LANGUAGE, static_cast<int>(language));

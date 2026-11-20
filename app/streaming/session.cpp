@@ -397,6 +397,12 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
 
 Session* Session::s_ActiveSession;
 QSemaphore Session::s_ActiveSessionSemaphore(1);
+bool Session::s_isSecondaryInstance = false;
+
+void Session::setSecondaryInstance(bool secondary)
+{
+    s_isSecondaryInstance = secondary;
+}
 
 class AbrFeedbackTask : public QRunnable
 {
@@ -4753,7 +4759,7 @@ void Session::exec()
     //
     // 这里只改初始创建；运行中 Ctrl+Alt+Shift+F 退出全屏时走的是 toggleFullscreen()
     // 里的那次 getWindowDimensions()，恢复的仍然是串流分辨率大小。
-    if (m_IsFullScreen && m_QtWindow != nullptr) {
+    if (m_IsFullScreen && m_QtWindow != nullptr && !m_Preferences->keepListWindowVisible) {
         const QRect creationGeometry = qtWindowCreationGeometryForSdl(m_QtWindow);
         if (creationGeometry.isValid()) {
             x = creationGeometry.x();
@@ -4934,7 +4940,8 @@ void Session::exec()
     // 由 C++ 来做是因为 QML 等不到通知：往下就进 SDL 事件循环了，那之后 Qt 的队列
     // 信号和定时器只在串流覆盖层可见时才会被 pump。
     Uint32 qtWindowHideDeadline = 0;
-    if (m_QtWindow != nullptr) {
+    if (m_QtWindow != nullptr &&
+        (!m_Preferences->keepListWindowVisible || s_isSecondaryInstance)) {
         if (awaitingFullScreenEntry) {
             qtWindowHideDeadline = SDL_GetTicks() + k_FullScreenEntryTimeoutMs;
         }
@@ -5116,6 +5123,10 @@ void Session::exec()
                (m_MenuButton && m_MenuButton->needsEventProcessing()) ||
                (m_Toast && m_Toast->needsEventProcessing()) || m_UsbCapabilityPending ||
                m_UsbLocalServer != nullptr || m_UsbTunnel != nullptr ||
+               // 策略开启时主窗口留在桌面上，必须把它算进"需要泵事件"，
+               // 否则这个循环（它已取代 app.exec()）不会绘制也不会响应点击。
+               (m_Preferences->keepListWindowVisible && !s_isSecondaryInstance &&
+                m_QtWindow != nullptr && m_QtWindow->isVisible()) ||
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
                (m_StylusReplayTest && m_StylusReplayTest->isPanelVisible());
 #else

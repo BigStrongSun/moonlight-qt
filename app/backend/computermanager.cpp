@@ -1,4 +1,6 @@
 #include "computermanager.h"
+#include <QProcess>
+#include <QCoreApplication>
 #include "boxartmanager.h"
 #include "nvcomputer.h"
 #include "nvhttp.h"
@@ -1015,3 +1017,36 @@ QString ComputerManager::generatePinString()
 }
 
 #include "computermanager.moc"
+
+// 拆分模式：把 computerIndex 解析成 CLI 可用的 "地址:端口"。
+// 拿不到活动地址时退回主机名（moonlight-qt 的 CLI 支持按名称解析主机）。
+QString ComputerManager::addressForIndex(int index)
+{
+    const auto computers = getComputers();
+    if (index < 0 || index >= computers.size()) {
+        return QString();
+    }
+
+    NvComputer* computer = computers[index];
+    if (!computer->activeAddress.isNull()) {
+        return computer->activeAddress.address() + ":" +
+               QString::number(computer->activeAddress.port());
+    }
+    return computer->name;
+}
+
+// 另开一个分离的 Moonlight 进程直接起流（CLI 模式：串流结束后该进程自行退出）。
+void ComputerManager::spawnStreamInstance(const QString &address, const QString &appName)
+{
+    if (address.isEmpty()) {
+        qWarning() << "spawnStreamInstance: empty address; nothing to spawn";
+        return;
+    }
+
+    const QStringList args{ "stream", address, appName };
+    if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), args)) {
+        qWarning() << "spawnStreamInstance: failed to start" << QCoreApplication::applicationFilePath() << args;
+    } else {
+        qInfo() << "spawnStreamInstance: launched secondary instance for" << address << appName;
+    }
+}

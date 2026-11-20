@@ -105,6 +105,14 @@ Column {
         }
 
         ToggleRow {
+            title: qsTr("Keep host list window visible")
+            searchKeywords: "Keep host list window visible, separate window, new window, host list"
+            description: qsTr("The stream opens in its own window and the main window stays visible instead of being hidden, so you can pick another host or start a second stream without exiting this one")
+            checked: StreamingPreferences.keepListWindowVisible
+            onToggled: function(value) { StreamingPreferences.keepListWindowVisible = value }
+        }
+
+        ToggleRow {
             title: qsTr("Stretch presentation")
             searchKeywords: "Stretch presentation"
             description: qsTr("Ignores both client and host PC aspect ratios, which is required for displaying Half-SBS (Side-By-Side) 3D signals to AR/XR devices that only support Full-SBS (usually 1920x1080 per eye, meaning a total resolution of 3840x1080)")

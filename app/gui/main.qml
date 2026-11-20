@@ -48,6 +48,9 @@ ApplicationWindow {
     property bool clearOnBack: false
 
     id: window
+    // 拆分模式下正在跑的 segue（null 表示没有）。AppView 用它做启动护栏：
+    // Moonlight 每个进程只允许一个活动会话，列表页可点时必须挡住重复启动。
+    property var detachedSegue: null
     // macOS 原生标题栏会居中显示窗口标题，和工具栏面包屑里的字标叠成双标题；
     // 清空原生标题，让工具栏做唯一的品牌位。Windows/Linux 无此问题。
     title: SystemProperties.isDarwin ? "" : Qt.application.displayName

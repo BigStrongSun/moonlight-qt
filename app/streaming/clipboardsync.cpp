@@ -4,6 +4,10 @@
 
 #include <QBuffer>
 #include <QClipboard>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
 #include <QGuiApplication>
 #include <QImage>
 #include <QImageReader>
@@ -293,7 +297,7 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
     if (kind != KIND_TEXT && kind != KIND_PNG && kind != KIND_REF) {
         return;
     }
-    QString id, mime;
+    QString id, mime, name;
     qint64 size = 0;
     if (kind == KIND_REF) {
         // Payload is a small UTF-8 JSON descriptor: {"id":"...","mime":"...","size":N}.
@@ -307,6 +311,8 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
         QJsonObject obj = doc.object();
         id = obj.value(QStringLiteral("id")).toString();
         mime = obj.value(QStringLiteral("mime")).toString();
+        // 非空 name 表示这是一个文件（跨机 URI 本身无意义，字节走 blob、名字走这里）
+        name = obj.value(QStringLiteral("name")).toString();
         const double declaredSize = obj.value(QStringLiteral("size")).toDouble(-1);
         if (!std::isfinite(declaredSize) || declaredSize < 0 || declaredSize > MAX_BLOB_BYTES ||
             std::floor(declaredSize) != declaredSize) {
@@ -317,7 +323,8 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
             ClipboardLog::warn("ClipboardSync: dropping inbound REF with invalid blob id");
             return;
         }
-        if (mime != QStringLiteral("image/png") && !mime.startsWith(QStringLiteral("text/"))) {
+        if (name.isEmpty() && mime != QStringLiteral("image/png") &&
+            !mime.startsWith(QStringLiteral("text/"))) {
             return;
         }
     }
@@ -370,7 +377,7 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
 
     if (kind == KIND_REF) {
         if (token == 0) {
-            fetchRefAndApply(id, mime, size);
+            fetchRefAndApply(id, mime, size, name);
             return;
         }
 
@@ -441,6 +448,108 @@ void ClipboardSync::applyInboundPng(const QByteArray& payload)
     // entire mime data set on the floor.
     mime->setData(QStringLiteral("image/png"), payload);
     cb->setMimeData(mime);
+}
+
+void ClipboardSync::applyInboundFile(const QByteArray& bytes, const QString& name)
+{
+    if (bytes.isEmpty() || name.isEmpty()) {
+        return;
+    }
+
+    QClipboard* cb = QGuiApplication::clipboard();
+    if (cb == nullptr) {
+        return;
+    }
+
+    // 只取 basename：对端传来的 name 不应带路径分隔符，否则可能越界写文件
+    const QString safeName = QFileInfo(name).fileName();
+    if (safeName.isEmpty() || safeName == QLatin1String(".") || safeName == QLatin1String("..")) {
+        ClipboardLog::warn("ClipboardSync: dropping inbound file with unusable name");
+        return;
+    }
+
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (dir.isEmpty()) {
+        dir = QDir::homePath() + QStringLiteral("/Moonlight");
+    }
+    dir += QStringLiteral("/ClipboardInbox");
+    if (!QDir().mkpath(dir)) {
+        ClipboardLog::warn("ClipboardSync: cannot create inbox '%s'", dir.toUtf8().constData());
+        return;
+    }
+
+    const QString path = dir + QLatin1Char('/') + safeName;
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        ClipboardLog::warn("ClipboardSync: cannot write inbox file (%s)",
+                           f.errorString().toUtf8().constData());
+        return;
+    }
+    f.write(bytes);
+    f.close();
+
+    rememberClipboard(QByteArray(), QImage());
+
+    // Qt 在 Windows 上会把 urls 呈现为 CF_HDROP，资源管理器等可直接粘贴成文件
+    QMimeData* mime = new QMimeData();
+    mime->setUrls({QUrl::fromLocalFile(path)});
+    cb->setMimeData(mime);
+    ClipboardLog::info("ClipboardSync: received file '%s' (%lld bytes) into inbox",
+                       safeName.toUtf8().constData(), static_cast<long long>(bytes.size()));
+}
+
+void ClipboardSync::sendLocalFileOutbound(const QMimeData* mimeData)
+{
+    QString path;
+    const QList<QUrl> urls = mimeData->urls();
+    for (const QUrl& url : urls) {
+        if (url.isLocalFile()) {
+            path = url.toLocalFile();
+            break;
+        }
+    }
+
+    const QFileInfo fi(path);
+    if (path.isEmpty() || !fi.exists() || !fi.isFile()) {
+        beginClipboardChange();
+        m_HaveClipboardSnapshot = false;
+        ClipboardLog::debug("ClipboardSync: file clipboard has no readable local file; sync skipped");
+        return;
+    }
+
+    const qint64 size = fi.size();
+    if (size <= 0 || size > MAX_BLOB_BYTES) {
+        beginClipboardChange();
+        m_HaveClipboardSnapshot = false;
+        ClipboardLog::info("ClipboardSync: file '%s' size %lld out of range (max %lld); sync skipped",
+                           fi.fileName().toUtf8().constData(), static_cast<long long>(size),
+                           static_cast<long long>(MAX_BLOB_BYTES));
+        return;
+    }
+
+    // 文字/图片哈希对文件都是 0/0，无法区分两个不同文件，所以另用签名去重
+    const QString signature = fi.fileName() + QLatin1Char('|') + QString::number(size);
+    if (m_HaveClipboardSnapshot && signature == m_LastFileSignature) {
+        return;
+    }
+
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        beginClipboardChange();
+        m_HaveClipboardSnapshot = false;
+        ClipboardLog::warn("ClipboardSync: cannot open local file for upload (%s)",
+                           f.errorString().toUtf8().constData());
+        return;
+    }
+    const QByteArray bytes = f.read(MAX_BLOB_BYTES);
+    f.close();
+
+    beginClipboardChange();
+    rememberClipboard(QByteArray(), QImage());
+    m_LastFileSignature = signature;
+    ClipboardLog::info("ClipboardSync: uploading local file '%s' (%lld bytes)",
+                       fi.fileName().toUtf8().constData(), static_cast<long long>(size));
+    uploadAndSendRef(bytes, QStringLiteral("application/octet-stream"), 0, fi.fileName());
 }
 
 bool ClipboardSync::encodeImageAsPng(const QImage& image,
@@ -761,10 +870,8 @@ void ClipboardSync::onLocalClipboardChanged()
     QString imageSourceDescription;
     const bool havePng = extractClipboardPng(mime, png, &imageSourceDescription);
     if (hasFileReferences(mime) && !havePng) {
-        beginClipboardChange();
-        m_HaveClipboardSnapshot = false;
-        ClipboardLog::debug(
-            "ClipboardSync: file clipboard without transferable image; sync skipped");
+        // 文件型剪贴板：把第一个本地文件作为 blob 上行（急切版，惰性留待后续）。
+        sendLocalFileOutbound(mime);
         return;
     }
 
@@ -1080,7 +1187,8 @@ void ClipboardSync::readBlobReply(
         });
 }
 
-void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& mime, quint32 token)
+void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& mime,
+                                   quint32 token, const QString& name)
 {
     QUrl url;
     if (!m_Active || payload.size() > MAX_BLOB_BYTES || m_BlobReplies.size() >= 4 ||
@@ -1099,7 +1207,7 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
     req.setSslConfiguration(sslConfig);
 
     readBlobReply(nam()->post(req, payload), 16 * 1024,
-                  [this, mime, token, payloadSize = payload.size()](const QByteArray& response,
+                  [this, mime, token, name, payloadSize = payload.size()](const QByteArray& response,
                                                                     const QString&) {
                       const QJsonDocument doc = QJsonDocument::fromJson(response);
                       const QString id = doc.object().value(QStringLiteral("id")).toString();
@@ -1113,6 +1221,10 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
                       meta.insert(QStringLiteral("id"), id);
                       meta.insert(QStringLiteral("mime"), mime);
                       meta.insert(QStringLiteral("size"), static_cast<double>(payloadSize));
+                      // 只在有名字时写 name，让旧的对端仍看到它认识的描述符形状
+                      if (!name.isEmpty()) {
+                          meta.insert(QStringLiteral("name"), name);
+                      }
                       QByteArray frame;
                       m_LastOutboundRef = QJsonDocument(meta).toJson(QJsonDocument::Compact);
                       if (encodeFrame(KIND_REF, token, m_LastOutboundRef, frame)) {
@@ -1121,12 +1233,15 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
                   });
 }
 
-void ClipboardSync::fetchRefAndApply(const QString& id, const QString& mime, qint64 advertisedSize)
+void ClipboardSync::fetchRefAndApply(const QString& id, const QString& mime,
+                                     qint64 advertisedSize, const QString& name)
 {
-    fetchBlob(id, advertisedSize, [this, mime](const QByteArray& bytes, const QString& fetchedMime) {
+    fetchBlob(id, advertisedSize, [this, mime, name](const QByteArray& bytes, const QString& fetchedMime) {
         Q_UNUSED(fetchedMime);
         // Trust the REF descriptor's mime over Content-Type.
-        if (mime == QStringLiteral("image/png")) {
+        if (!name.isEmpty()) {
+            applyInboundFile(bytes, name);
+        } else if (mime == QStringLiteral("image/png")) {
             applyInboundPng(bytes);
         } else if (mime.startsWith(QStringLiteral("text/"))) {
             applyInboundText(bytes);

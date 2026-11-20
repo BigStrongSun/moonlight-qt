@@ -227,6 +227,11 @@ public:
 
     Q_INVOKABLE void addNewHostManually(QString address);
 
+    // 拆分模式用：本进程只能有一路活动会话（s_ActiveSessionSemaphore 初值 1），
+    // 所以列表页上再次启动时，需要另开一个 Moonlight 进程去串。
+    Q_INVOKABLE QString addressForIndex(int index);
+    Q_INVOKABLE void spawnStreamInstance(const QString &address, const QString &appName);
+
     void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
 
     QString generatePinString();

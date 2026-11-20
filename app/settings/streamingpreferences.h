@@ -249,6 +249,7 @@ public:
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
     Q_PROPERTY(RendererSelection rendererSelection MEMBER rendererSelection NOTIFY rendererSelectionChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
+    Q_PROPERTY(bool keepListWindowVisible MEMBER keepListWindowVisible NOTIFY keepListWindowVisibleChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
     Q_PROPERTY(UIDisplayMode uiDisplayMode MEMBER uiDisplayMode NOTIFY uiDisplayModeChanged)
     Q_PROPERTY(bool rememberWindowPosition MEMBER rememberWindowPosition NOTIFY rememberWindowPositionChanged)
@@ -338,6 +339,7 @@ public:
     bool enableYUV444;
     VideoDecoderSelection videoDecoderSelection;
     WindowMode windowMode;
+    bool keepListWindowVisible;
     WindowMode recommendedFullScreenMode;
     UIDisplayMode uiDisplayMode;
     bool rememberWindowPosition;
@@ -384,6 +386,7 @@ signals:
     void backgroundOverlayOpacityChanged();
     void backgroundSetupCompletedChanged();
     void windowModeChanged();
+    void keepListWindowVisibleChanged();
     void framePacingChanged();
     void videoEnhancementChanged();
     void streamResolutionScaleChanged();
