@@ -145,10 +145,12 @@ Column {
             description: qsTr("While a device is shared, it is taken over by the USB/IP driver and stops working on this computer until you release it. The first share asks for administrator confirmation; the authorization is remembered for a few minutes.")
         }
 
-        SettingsRow {
-            title: qsTr("Voice input")
-            searchKeywords: "Voice input"
-            description: qsTr("Microphone audio does not travel through USB forwarding. Use the in-stream microphone feature for voice.")
+        ToggleRow {
+            title: qsTr("Stream microphone to the host")
+            searchKeywords: "microphone stream voice input mic"
+            description: qsTr("Captures this computer's microphone, encodes it as Opus and sends it to the host, where it is mixed into a virtual microphone. It can also be toggled while streaming from the overlay menu. Microphone audio never travels through USB forwarding.")
+            checked: StreamingPreferences.enableMicrophone
+            onToggled: function(value) { StreamingPreferences.enableMicrophone = value }
         }
     }
 

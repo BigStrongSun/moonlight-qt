@@ -74,12 +74,6 @@ Column {
             onToggled: function(value) { StreamingPreferences.muteOnFocusLoss = value }
         }
 
-        ToggleRow {
-            title: qsTr("Enable microphone streaming (test)")
-            searchKeywords: "Enable microphone streaming (test)"
-            checked: StreamingPreferences.enableMicrophone
-            onToggled: function(value) { StreamingPreferences.enableMicrophone = value }
-        }
     }
 
     // ================= 主机 =================
